@@ -10,7 +10,8 @@
 #include <sys/wait.h>
 #include <netinet/in.h>
 
-#define VERSION "0.001"
+#define PROGNAME    "testhelperd"
+#define VERSION     "0.002"
 
 /*
 protocol:
@@ -49,6 +50,7 @@ static int g_daemonize = 0;
 static int g_portno = 0;
 static int g_sockfd = 0;
 static int g_session = 0;
+static int g_pid = 0;
 
 static FILE *g_ifp = 0;
 static FILE *g_ofp = 0;
@@ -62,6 +64,7 @@ typedef enum {
     CMD_TYPE_PUTFILE,
     CMD_TYPE_GETFILE,
     CMD_TYPE_VERSION,
+    CMD_TYPE_QUITEXE,
 
     CMD_TYPE_MAX
 } e_cmd_type;
@@ -74,6 +77,7 @@ static const char *g_cmd_type[] = {
     "putfile",
     "getfile",
     "version",
+    "quitexe"
 };
 
 static const unsigned char base64_table[65] =
@@ -211,7 +215,7 @@ unsigned char * base64_decode(const unsigned char *src, size_t len,
 
 static void usage()
 {
-    fprintf(stderr,"usage: testhelperd [-vd] [-p port] [-w working directory]\n");
+    fprintf(stderr,"usage: %s [-vd] [-p port] [-w working directory]\n", PROGNAME);
     exit(EINVAL);
 }
 
@@ -265,6 +269,15 @@ static int do_verbose()
     }
 
     return 0;
+}
+
+static int __cleanup(int code)
+{
+    if (code == 0 && g_logfile == 0) {
+        unlink(g_logfile);
+    }
+
+    exit(code);
 }
 
 static int __send_message(FILE *fp, char *fmt,...)
@@ -359,6 +372,40 @@ end:
     return -ret;
 }
 
+static int do_quitexe(char *line)
+{
+    int ret = 0;
+    s_protocol_out out;
+    char buf[32];
+
+    snprintf(buf, sizeof(buf), "kill -9 %d", g_pid);
+    int rc = system(buf);
+    if (rc == -1) {
+        ret = errno;
+    } else if (WIFSIGNALED(rc)) {
+        ret = EINTR;
+    } else if (WIFEXITED(rc)) {
+        ret = WEXITSTATUS(rc);
+    } else {
+        ret = EIO;
+    }
+
+    memset(&out, 0, sizeof(s_protocol_out));
+    out.session = g_session;
+    out.status = ret;
+    out.command = CMD_TYPE_QUITEXE;
+    out.buf = strerror(ret);
+    out.len = strlen(out.buf);
+    send_reply(&out);
+
+    if (ret == 0) {
+        /* Terminate the connection. */
+        __cleanup(0);
+    }
+
+    return -ret;
+}
+
 static int __parse_message(char *line, s_protocol_in *in)
 {
     int i;
@@ -420,6 +467,7 @@ static int do_command(char *line)
     ret = __parse_message(line, &in);
     if (ret && in.session != g_session) {
         /* Can't parse message */
+        ret = EINVAL;
         goto err;
     }
 
@@ -429,6 +477,8 @@ static int do_command(char *line)
     switch(in.command) {
     case CMD_TYPE_SHELLCMD:
         return do_shellcmd((char *)outstr);
+    case CMD_TYPE_QUITEXE:
+        return do_quitexe((char *)outstr);
     default:
         /* illegal command */
         ret = EPERM;
@@ -446,15 +496,6 @@ err:
     send_reply(&out);
 
     return -ret;
-}
-
-static int do_cleanup(int code)
-{
-    if (code == 0 && g_logfile == 0) {
-        unlink(g_logfile);
-    }
-
-    exit(code);
 }
 
 static int do_process(int ifd, int ofd)
@@ -491,7 +532,7 @@ static int do_process(int ifd, int ofd)
         ssize_t n = getline(&line, &linelen, g_ifp);
         if (n < 0) {
             /* Client disconnect */
-            do_cleanup(0);
+            __cleanup(0);
         }
 
         do_command(line);
@@ -526,6 +567,9 @@ static int init_server()
 
     /* Save socket fd */
     g_sockfd = sockfd;
+
+    /* Save pid */
+    g_pid = getpid();
 
     /* Server daemonizes if necessary */
     do_daemon();
@@ -573,8 +617,6 @@ static int start_server()
                 do_verbose();
                 /* Process cmd */
                 do_process(newsockfd, newsockfd);
-
-                _exit(0);
             }
             _exit(0);
         } else {
