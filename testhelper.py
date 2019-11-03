@@ -11,8 +11,11 @@ import base64
 class th_client(object):
 
     def __init__(self, verbose):
-        if verbose == True:
-            logging.basicConfig(level=logging.DEBUG)
+
+        level = logging.INFO if verbose == False else logging.DEBUG
+        format = "PID[%(process)d]-[%(levelname)s]: %(message)s"
+        logging.basicConfig(level=level, format=format)
+
         self.__verbose = verbose
         self.__socket = None
 
@@ -47,23 +50,24 @@ class th_client(object):
         buf = self.__getline(self.__socket)
         (session, status, command, bufstr) = self.__parse_message(buf)
         if command != self.__cmd_type_handshake:
-            raise Exception("Invalid cmd type!", command)
+            raise RuntimeError("CmdTypeError:%s" % command)
         self.__session = session
 
     def __do_shellcmd(self, cmdline):
-        # send shell cmd
-        self.__send_message(
-            self.__socket,
-            self.__session,
-            self.__cmd_type_shellcmd,
-            cmdline + " 2>&1")
+        for cmd in cmdline:
+            # send shell cmd
+            self.__send_message(
+                self.__socket,
+                self.__session,
+                self.__cmd_type_shellcmd,
+                cmd + " 2>&1")
 
-        # show the result
-        buf = self.__getline(self.__socket)
-        (session, status, command, bufstr) = self.__parse_message(buf)
-        print bufstr
+            # show the result
+            buf = self.__getline(self.__socket)
+            (session, status, command, bufstr) = self.__parse_message(buf)
+            logging.info("Running '%s' ... \n" % (cmd) + bufstr)
 
-    def __do_quitexe(self):
+    def __do_quitexe(self, cmdline):
         # send shell cmd
         self.__send_message(
             self.__socket,
@@ -72,13 +76,11 @@ class th_client(object):
             "")
 
     def run_command(self, cmds):
-        if cmds[0] == self.__cmd_type_shellcmd:
-            for cmd in cmds[1:]:
-                self.__cmd_handers[cmds[0]]['handler'](cmd)
-        elif cmds[0] == self.__cmd_type_quitexe:
-            self.__cmd_handers[cmds[0]]['handler']()
-        else:
-            raise Exception("Invalid cmd type!", cmds[0])
+
+        try:
+            self.__cmd_handers[cmds[0]]['handler'](cmds[1:])
+        except KeyError as msg:
+            raise RuntimeError("KeyError:%s" % msg)
 
     @staticmethod
     def __send_message(socket, session, command, buf):
@@ -128,7 +130,7 @@ def main():
         client.run_command(args.cmds)
 
     except RuntimeError as e:
-        print '%s %s: %s' % (args.fhost, args.cmds, e)
+        logging.error('%s %s: %s' % (args.fhost, args.cmds, e))
 
 if __name__ == '__main__':
     main()

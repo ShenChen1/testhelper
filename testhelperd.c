@@ -47,7 +47,7 @@ static char g_logfile[NAME_MAX];
 
 static int g_verbose = 0;
 static int g_daemonize = 0;
-static int g_portno = 0;
+static int g_portno = 1314;
 static int g_sockfd = 0;
 static int g_session = 0;
 static int g_pid = 0;
@@ -253,6 +253,9 @@ static int do_daemon()
             exit(errno);
         }
     }
+
+    /* Save pid */
+    g_pid = getpid();
 
     return 0;
 }
@@ -567,9 +570,6 @@ static int init_server()
 
     /* Save socket fd */
     g_sockfd = sockfd;
-
-    /* Save pid */
-    g_pid = getpid();
 
     /* Server daemonizes if necessary */
     do_daemon();
