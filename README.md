@@ -13,7 +13,7 @@ Run cmd on target machine via testhelperd
 
 ## Client
 ```
-[root@sc testhelper]# ./testhelper.py 192.168.0.23:1314 shellcmd ls "ls -al"
+[root@sc testhelper]# ./testhelper.py 192.168.0.23:1234 shellcmd ls "ls -al"
 PID[8492]-[INFO]: Running 'ls' ... 
 README.md
 testhelperd.c
