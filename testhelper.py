@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import os
 import socket
 import threading
 import logging
@@ -11,11 +12,12 @@ import base64
 class th_client(object):
 
     def __init__(self, verbose):
-
+        # log config
         level = logging.INFO if verbose == False else logging.DEBUG
         format = "PID[%(process)d]-[%(levelname)s]: %(message)s"
         logging.basicConfig(level=level, format=format)
 
+        self.__blocksize = 4096
         self.__verbose = verbose
         self.__socket = None
 
@@ -23,12 +25,15 @@ class th_client(object):
         self.__cmd_type_handshake = 'handshake'
         self.__cmd_type_shellcmd = 'shellcmd'
         self.__cmd_type_quitexe = 'quitexe'
+        self.__cmd_type_putfile = 'putfile'
 
         self.__cmd_handers = {}
         self.__cmd_handers[self.__cmd_type_shellcmd] = \
             { 'args_min':1, 'args_max':None, 'handler':self.__do_shellcmd }
         self.__cmd_handers[self.__cmd_type_quitexe] = \
             { 'args_min':0, 'args_max':0, 'handler':self.__do_quitexe }
+        self.__cmd_handers[self.__cmd_type_putfile] = \
+            { 'args_min':1, 'args_max':2, 'handler':self.__do_putfile }
 
     def __del__(self):
         if self.__socket:
@@ -37,7 +42,10 @@ class th_client(object):
 
     def create_session(self, fhost):
         self.__fhost = fhost
-        host, port = fhost.split(':', 1)
+        try:
+            host, port = fhost.split(':', 1)
+        except ValueError as msg:
+            raise RuntimeError("ValueError:%s" % msg)
         logging.debug('session: host=%s port=%s', host, port)
 
         try:
@@ -65,20 +73,97 @@ class th_client(object):
             # show the result
             buf = self.__getline(self.__socket)
             (session, status, command, bufstr) = self.__parse_message(buf)
-            logging.info("Running '%s' ... \n" % (cmd) + bufstr)
+            if command != self.__cmd_type_shellcmd:
+                raise RuntimeError("CmdTypeError:%s" % command)
+
+            if status == "0":
+                logging.info("Running '%s' ... \n" % (cmd) + bufstr)
+            else:
+                logging.info("Running '%s' ... " % (cmd))
+                logging.error("[%s]: " % (status) + bufstr)
 
     def __do_quitexe(self, cmdline):
-        # send shell cmd
+        # send quit cmd
         self.__send_message(
             self.__socket,
             self.__session,
             self.__cmd_type_quitexe,
-            "")
+            "quit")
+
+    def __do_putfile(self, cmdline):
+        # check the srcfile
+        srcfile = cmdline[0]
+        if os.path.isfile(srcfile) is False:
+            raise RuntimeError("FileError:%s is not a file" % srcfile)
+
+        # find the dstfile name
+        dstfile = srcfile[0]
+        if len(cmdline) > 1:
+            dstfile = cmdline[1]
+
+        # get the srcfile file size
+        length = os.path.getsize(srcfile)
+
+        # send putfile cmd
+        self.__send_message(
+            self.__socket,
+            self.__session,
+            self.__cmd_type_putfile,
+            "%s %s %s" % (srcfile, dstfile, length))
+
+        # wait for reply
+        buf = self.__getline(self.__socket)
+        (session, status, command, bufstr) = self.__parse_message(buf)
+        if command != self.__cmd_type_putfile:
+            raise RuntimeError("CmdTypeError:%s" % command)
+        elif status != "0":
+            logging.error("[%s]: " % (status) + bufstr)
+            raise RuntimeError("CmdTypeError:%s" % command)
+        else:
+            logging.info("Begin to send '%s' ... " % (srcfile))
+
+        # open
+        file = open(srcfile, 'rb')
+
+        needed = length
+        while needed > 0:
+            buflen = min(self.__blocksize, needed)
+            # read file
+            buffer = file.read(buflen)
+            assert len(buffer) == buflen
+            # send data
+            self.__send_message(
+                self.__socket,
+                self.__session,
+                self.__cmd_type_putfile,
+                buffer)
+            needed -= buflen
+            # recv ack
+            buf = self.__getline(self.__socket)
+            (session, status, command, bufstr) = self.__parse_message(buf)
+            if command != self.__cmd_type_putfile:
+                raise RuntimeError("CmdTypeError:%s" % command)
+            elif status != "0":
+                logging.error("[%s]: " % (status) + bufstr)
+                raise RuntimeError("CmdTypeError:%s" % command)
+            else:
+                logging.info("Sending '%s' ... (%.02f %%)" % (srcfile, (length - needed) / length * 100))
+
+        # close file
+        file.close()
+
 
     def run_command(self, cmds):
-
         try:
-            self.__cmd_handers[cmds[0]]['handler'](cmds[1:])
+            cmd_hander = self.__cmd_handers[cmds[0]]
+            # check args
+            args_min = cmd_hander['args_min']
+            args_max = cmd_hander['args_max']
+            if len(cmds) - 1 < args_min or (args_max is not None and len(cmds) - 1 > args_max):
+                raise RuntimeError("cmd range:" + cmds[1:])
+
+            # run cmd handler
+            cmd_hander['handler'](cmds[1:])
         except KeyError as msg:
             raise RuntimeError("KeyError:%s" % msg)
 
@@ -87,7 +172,7 @@ class th_client(object):
         # (session) {command} [len] base64-buf
         data = '(%s) {%s} %s\n' % (session, command, base64.b64encode(buf))
         socket.send(data)
-        data = '(%s) {%s} %s\n' % (session, command, buf)
+        data = '(%s) {%s} %s' % (session, command, buf)
         logging.debug('client: %s', data)
 
     @staticmethod

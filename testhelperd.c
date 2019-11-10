@@ -11,7 +11,7 @@
 #include <netinet/in.h>
 
 #define PROGNAME    "testhelperd"
-#define VERSION     "0.002"
+#define VERSION     "0.003"
 
 /*
 protocol:
@@ -51,6 +51,7 @@ static int g_portno = 1314;
 static int g_sockfd = 0;
 static int g_session = 0;
 static int g_pid = 0;
+static int g_timeout = 30;
 
 static FILE *g_ifp = 0;
 static FILE *g_ofp = 0;
@@ -59,6 +60,7 @@ static FILE *g_lfp = 0;
 typedef enum {
     CMD_TYPE_UNKNOWN,
     CMD_TYPE_HANDSHAKE,
+    CMD_TYPE_TIMEOUT,
 
     CMD_TYPE_SHELLCMD,
     CMD_TYPE_PUTFILE,
@@ -69,15 +71,16 @@ typedef enum {
     CMD_TYPE_MAX
 } e_cmd_type;
 
-static const char *g_cmd_type[] = {
-    "unknown",
-    "handshake",
+static const char *g_cmd_type[CMD_TYPE_MAX] = {
+    [CMD_TYPE_UNKNOWN] = "unknown",
+    [CMD_TYPE_HANDSHAKE] ="handshake",
+    [CMD_TYPE_TIMEOUT] = "timeout",
 
-    "shellcmd",
-    "putfile",
-    "getfile",
-    "version",
-    "quitexe"
+    [CMD_TYPE_SHELLCMD] = "shellcmd",
+    [CMD_TYPE_PUTFILE] = "putfile",
+    [CMD_TYPE_GETFILE] = "getfile",
+    [CMD_TYPE_VERSION] = "version",
+    [CMD_TYPE_QUITEXE] = "quitexe",
 };
 
 static const unsigned char base64_table[65] =
@@ -215,7 +218,7 @@ unsigned char * base64_decode(const unsigned char *src, size_t len,
 
 static void usage()
 {
-    fprintf(stderr,"usage: %s [-vd] [-p port] [-w working directory]\n", PROGNAME);
+    fprintf(stderr,"usage: %s [-vd] [-t timeout] [-p port] [-w working directory]\n", PROGNAME);
     exit(EINVAL);
 }
 
@@ -223,13 +226,16 @@ static int parse_config(int argc, char **argv)
 {
     int opt;
 
-    while ((opt = getopt(argc, argv, "vdp:w:")) != -1) {
+    while ((opt = getopt(argc, argv, "vdt:p:w:")) != -1) {
         switch (opt) {
         case 'v':
             g_verbose = 1;
             break;
         case 'd':
             g_daemonize = 1;
+            break;
+        case 't':
+            g_timeout = atoi(optarg);
             break;
         case 'p':
             g_portno = atoi(optarg);
@@ -300,6 +306,9 @@ static int send_reply(s_protocol_out *out)
 {
     size_t outlen = 0;
     unsigned char *outstr = base64_encode((void *)out->buf, out->len + 1, &outlen);
+    if (outstr == NULL) {
+        return -ENOMEM;
+    }
 
     __send_message(g_ofp, "(%d) <%d> {%s} %s\n",
                    g_session,
@@ -310,7 +319,7 @@ static int send_reply(s_protocol_out *out)
     free(outstr);
 
     /* Debug */
-    __send_message(g_lfp, "(%d) <%d> {%s} %s\n",
+    __send_message(g_lfp, "server: (%d) <%d> {%s} %s\n",
                    g_session,
                    out->status,
                    g_cmd_type[out->command],
@@ -319,94 +328,19 @@ static int send_reply(s_protocol_out *out)
     return 0;
 }
 
-static int do_shellcmd(char *line)
+static void __timedout(int sig)
 {
-    int ret = 0;
-    const char open_mode[] = "re";
     s_protocol_out out;
-
-    FILE *popen_stream = popen(line, open_mode);
-    if (popen_stream == NULL) {
-        goto end;
-    }
-
-    int rs_size = 0;
-    char *rs_buf = NULL;
-    /* Get all output */
-    while (1) {
-        char *line = NULL;
-        size_t len = 0;
-        ssize_t read = getline(&line, &len, popen_stream);
-        if (read == -1) {
-            break;
-        }
-
-        rs_buf = realloc(rs_buf, rs_size + read + 1);
-        rs_buf[rs_size + read] = '\0';
-        strncpy(&rs_buf[rs_size], line, read + 1);
-        rs_size += read;
-
-        free(line);
-    }
-
-    int rc = pclose(popen_stream);
-    if (rc == -1) {
-        ret = errno;
-    } else if (WIFSIGNALED(rc)) {
-        ret = EINTR;
-    } else if (WIFEXITED(rc)) {
-        ret = WEXITSTATUS(rc);
-    } else {
-        ret = EIO;
-    }
-
-end:
-    memset(&out, 0, sizeof(s_protocol_out));
-    out.session = g_session;
-    out.status = ret;
-    out.command = CMD_TYPE_SHELLCMD;
-    out.buf = rs_buf ? rs_buf : strerror(ret);
-    out.len = strlen(out.buf);
-    send_reply(&out);
-
-    /* Free the buffer for saving result */
-    if (rs_buf) free(rs_buf);
-
-    return -ret;
-}
-
-static int do_quitexe(char *line)
-{
-    int ret = 0;
-    s_protocol_out out;
-    char buf[32];
-
-    snprintf(buf, sizeof(buf), "kill -9 %d", g_pid);
-    int rc = system(buf);
-    if (rc == -1) {
-        ret = errno;
-    } else if (WIFSIGNALED(rc)) {
-        ret = EINTR;
-    } else if (WIFEXITED(rc)) {
-        ret = WEXITSTATUS(rc);
-    } else {
-        ret = EIO;
-    }
 
     memset(&out, 0, sizeof(s_protocol_out));
     out.session = g_session;
-    out.status = ret;
-    out.command = CMD_TYPE_QUITEXE;
-    out.buf = strerror(ret);
+    out.status = ETIME;
+    out.command = CMD_TYPE_TIMEOUT;
+    out.buf = strerror(out.status);
     out.len = strlen(out.buf);
     send_reply(&out);
 
-    if (ret == 0) {
-        /* Terminate the connection. */
-        __cleanup(0);
-    }
-
-    return -ret;
+    __cleanup(0);
 }
 
 static int __parse_message(char *line, s_protocol_in *in)
@@ -457,6 +391,194 @@ err:
     return -EINVAL;
 }
 
+static int do_shellcmd(char *line)
+{
+    int ret = 0;
+    const char open_mode[] = "re";
+    s_protocol_out out;
+
+    FILE *popen_stream = popen(line, open_mode);
+    if (popen_stream == NULL) {
+        goto end;
+    }
+
+    int rs_size = 0;
+    char *rs_buf = NULL;
+    /* Get all output */
+    while (1) {
+        char *line = NULL;
+        size_t len = 0;
+        ssize_t read = getline(&line, &len, popen_stream);
+        if (read == -1) {
+            if (line) free(line);
+            break;
+        }
+
+        rs_buf = realloc(rs_buf, rs_size + read + 1);
+        rs_buf[rs_size + read] = '\0';
+        strncpy(&rs_buf[rs_size], line, read + 1);
+        rs_size += read;
+
+        free(line);
+    }
+
+    int rc = pclose(popen_stream);
+    if (rc == -1) {
+        ret = -errno;
+    } else if (WIFSIGNALED(rc)) {
+        ret = -EINTR;
+    } else if (WIFEXITED(rc)) {
+        ret = WEXITSTATUS(rc);
+    } else {
+        ret = -EIO;
+    }
+
+end:
+    memset(&out, 0, sizeof(s_protocol_out));
+    out.session = g_session;
+    out.status = -ret;
+    out.command = CMD_TYPE_SHELLCMD;
+    out.buf = rs_buf ? rs_buf : strerror(out.status);
+    out.len = strlen(out.buf);
+    send_reply(&out);
+
+    /* Free the buffer for saving result */
+    if (rs_buf) free(rs_buf);
+
+    return ret;
+}
+
+static int do_putfile(char *line)
+{
+    /* srdfile dstfile length */
+    int ret;
+    FILE *fp = NULL;
+    s_protocol_in in;
+    s_protocol_out out;
+    size_t length = 0;
+    char srcfile[NAME_MAX];
+    char dstfile[NAME_MAX];
+
+    ret = sscanf(line, "%s %s %lu", srcfile, dstfile, &length);
+    if (ret == EOF) {
+        ret = -errno;
+        goto end; 
+    }
+
+    /* Reply to client and let it send data */
+    memset(&out, 0, sizeof(s_protocol_out));
+    out.session = g_session;
+    out.status = 0;
+    out.command = CMD_TYPE_PUTFILE;
+    out.buf = strerror(out.status);
+    out.len = strlen(out.buf);
+    send_reply(&out);
+
+    /* Save file */
+    fp = fopen(dstfile, "wb+");
+    if (fp == NULL) {
+        ret = -errno;
+        goto end; 
+    }
+
+    size_t bytes = 0;
+    while (length > bytes) {
+
+        /* Read file data */
+        char * line = NULL;
+        size_t linelen = 0;
+        ssize_t n = getline(&line, &linelen, g_ifp);
+        if (n < 0) {
+            if (line) free(line);
+            /* Client disconnect */
+            __cleanup(0);
+        }
+
+        ret = __parse_message(line, &in);
+        if (ret && 
+            in.session != g_session &&
+            in.command != CMD_TYPE_PUTFILE) {
+            ret = -EINVAL;
+            goto end;
+        }
+
+        size_t bsize = 0;
+        unsigned char *outstr = base64_decode((void *)in.buf, in.len + 1, &bsize);
+        if (outstr == NULL) {
+            ret = -ENOMEM;
+            goto end;
+        }
+
+        /* Write */
+        if (fwrite(outstr, 1, bsize, fp) != bsize) {
+            ret = -ENODATA;
+            goto end;
+        }
+
+        /* End once loop */
+        free(outstr);
+        bytes += bsize;
+
+        /* ACK */
+        memset(&out, 0, sizeof(s_protocol_out));
+        out.session = g_session;
+        out.status = 0;
+        out.command = CMD_TYPE_PUTFILE;
+        out.buf = strerror(out.status);
+        out.len = strlen(out.buf);
+        send_reply(&out);
+    }
+
+    /* End */
+    fclose(fp);
+
+    return 0;
+
+end:
+    memset(&out, 0, sizeof(s_protocol_out));
+    out.session = g_session;
+    out.status = -ret;
+    out.command = CMD_TYPE_PUTFILE;
+    out.buf = strerror(out.status);
+    out.len = strlen(out.buf);
+    send_reply(&out);
+
+    if (fp) {
+        fclose(fp);
+    }
+
+    return ret;
+}
+
+static int do_quitexe(char *line)
+{
+    int ret = 0;
+    s_protocol_out out;
+    char buf[32];
+
+    snprintf(buf, sizeof(buf), "kill -9 %d", g_pid);
+    int rc = system(buf);
+    if (rc == -1) {
+        ret = -errno;
+    } else if (WIFSIGNALED(rc)) {
+        ret = -EINTR;
+    } else if (WIFEXITED(rc)) {
+        ret = WEXITSTATUS(rc);
+    } else {
+        ret = -EIO;
+    }
+
+    memset(&out, 0, sizeof(s_protocol_out));
+    out.session = g_session;
+    out.status = -ret;
+    out.command = CMD_TYPE_QUITEXE;
+    out.buf = strerror(out.status);
+    out.len = strlen(out.buf);
+    send_reply(&out);
+
+    return ret;
+}
+
 static int do_command(char *line)
 {
     int ret;
@@ -464,41 +586,55 @@ static int do_command(char *line)
     s_protocol_out out;
 
     /* Save cmd to log */
-    fprintf(g_lfp, "> %s", line);
+    fprintf(g_lfp, "client: %s", line);
     fflush(g_lfp);
 
     ret = __parse_message(line, &in);
     if (ret && in.session != g_session) {
-        /* Can't parse message */
-        ret = EINVAL;
         goto err;
     }
 
     size_t outline = 0;
     unsigned char *outstr = base64_decode((void *)in.buf, in.len + 1, &outline);
+    if (outstr == NULL) {
+        ret = -ENOMEM;
+        goto err;
+    }
 
     switch(in.command) {
     case CMD_TYPE_SHELLCMD:
-        return do_shellcmd((char *)outstr);
+        ret = do_shellcmd((char *)outstr);
+        break;
     case CMD_TYPE_QUITEXE:
-        return do_quitexe((char *)outstr);
+        ret = do_quitexe((char *)outstr);
+        break;
+    case CMD_TYPE_PUTFILE:
+        ret = do_putfile((char *)outstr);
+        break;
     default:
         /* illegal command */
-        ret = EPERM;
+        ret = -EPERM;
+        break;
     }
-
+    
+    /* Decode memory */
     free(outstr);
+
+    if (ret == 0) {
+        /* Terminate the connection. */
+        return 0;
+    }
 
 err:
     memset(&out, 0, sizeof(s_protocol_out));
     out.session = g_session;
-    out.status = ret;
+    out.status = -ret;
     out.command = CMD_TYPE_UNKNOWN;
-    out.buf = strerror(ret);
+    out.buf = strerror(out.status);
     out.len = strlen(out.buf);
     send_reply(&out);
 
-    return -ret;
+    return ret;
 }
 
 static int do_process(int ifd, int ofd)
@@ -528,12 +664,19 @@ static int do_process(int ifd, int ofd)
     out.len = strlen(out.buf);
     send_reply(&out);
 
+    signal(SIGALRM, __timedout);
+    alarm(g_timeout);
+
     /* Loop */
     while (1) {
+        /* Reset time count */
+        alarm(g_timeout);
+
         char * line = NULL;
         size_t linelen = 0;
         ssize_t n = getline(&line, &linelen, g_ifp);
         if (n < 0) {
+            if (line) free(line);
             /* Client disconnect */
             __cleanup(0);
         }
