@@ -26,6 +26,7 @@ class th_client(object):
         self.__cmd_type_shellcmd = 'shellcmd'
         self.__cmd_type_quitexe = 'quitexe'
         self.__cmd_type_putfile = 'putfile'
+        self.__cmd_type_getfile = 'getfile'
 
         self.__cmd_handers = {}
         self.__cmd_handers[self.__cmd_type_shellcmd] = \
@@ -34,6 +35,8 @@ class th_client(object):
             { 'args_min':0, 'args_max':0, 'handler':self.__do_quitexe }
         self.__cmd_handers[self.__cmd_type_putfile] = \
             { 'args_min':1, 'args_max':2, 'handler':self.__do_putfile }
+        self.__cmd_handers[self.__cmd_type_getfile] = \
+            { 'args_min':1, 'args_max':2, 'handler':self.__do_getfile }
 
     def __del__(self):
         if self.__socket:
@@ -79,7 +82,7 @@ class th_client(object):
             if status == "0":
                 logging.info("Running '%s' ... \n" % (cmd) + bufstr)
             else:
-                logging.info("Running '%s' ... " % (cmd))
+                logging.info("Running '%s' ... " % cmd)
                 logging.error("[%s]: " % (status) + bufstr)
 
     def __do_quitexe(self, cmdline):
@@ -97,7 +100,7 @@ class th_client(object):
             raise RuntimeError("FileError:%s is not a file" % srcfile)
 
         # find the dstfile name
-        dstfile = srcfile[0]
+        dstfile = os.path.basename(srcfile)  
         if len(cmdline) > 1:
             dstfile = cmdline[1]
 
@@ -120,10 +123,13 @@ class th_client(object):
             logging.error("[%s]: " % (status) + bufstr)
             raise RuntimeError("CmdTypeError:%s" % command)
         else:
-            logging.info("Begin to send '%s' ... " % (srcfile))
+            logging.info("Begin to send '%s' ... " % srcfile)
 
         # open
         file = open(srcfile, 'rb')
+        if file is None:
+            logging.error("Can't open %s " % srcfile)
+            raise RuntimeError("open:%s" % srcfile)
 
         needed = length
         while needed > 0:
@@ -152,6 +158,63 @@ class th_client(object):
         # close file
         file.close()
 
+    def __do_getfile(self, cmdline):
+        # find the srcfile name
+        srcfile = cmdline[0]
+        # find the dstfile name
+        dstfile = os.path.basename(srcfile)  
+        if len(cmdline) > 1:
+            dstfile = cmdline[1]
+
+        # send getfile cmd
+        self.__send_message(
+            self.__socket,
+            self.__session,
+            self.__cmd_type_getfile,
+            "%s %s %lu" % (srcfile, dstfile, self.__blocksize))
+
+        # wait for reply
+        buf = self.__getline(self.__socket)
+        (session, status, command, bufstr) = self.__parse_message(buf)
+        if command != self.__cmd_type_getfile:
+            raise RuntimeError("CmdTypeError:%s" % command)
+        elif status != "0":
+            logging.error("[%s]: " % (status) + bufstr)
+            raise RuntimeError("CmdTypeError:%s" % command)
+        else:
+            logging.info("Begin to receive '%s' ... " % srcfile)
+        length = int(bufstr.strip('\0'))
+
+        # create file
+        file = open(dstfile, 'wb+')
+        if file is None:
+            logging.error("Can't open %s " % dstfile)
+            raise RuntimeError("open:%s" % dstfile)
+
+        needed = length
+        while needed > 0:
+            # recv data
+            buf = self.__getline(self.__socket) 
+            (session, status, command, bufstr) = self.__parse_message(buf)
+            if command != self.__cmd_type_getfile:
+                raise RuntimeError("CmdTypeError:%s" % command)
+            elif status != "0":
+                logging.error("[%s]: " % (status) + bufstr)
+                raise RuntimeError("CmdTypeError:%s" % command)
+            else:
+                needed -= len(bufstr)
+                logging.info("Receiving '%s' ... (%.02f %%)" % (srcfile, float(length - needed) / length * 100))
+            # write file
+            file.write(bufstr)
+            # send ack
+            self.__send_message(
+                self.__socket,
+                self.__session,
+                self.__cmd_type_putfile,
+                "continue")
+
+        # close file
+        file.close()
 
     def run_command(self, cmds):
         try:
@@ -169,7 +232,7 @@ class th_client(object):
 
     @staticmethod
     def __send_message(socket, session, command, buf):
-        # (session) {command} [len] base64-buf
+        # (session) {command} base64-buf
         data = '(%s) {%s} %s\n' % (session, command, base64.b64encode(buf))
         socket.send(data)
         data = '(%s) {%s} %s' % (session, command, buf)

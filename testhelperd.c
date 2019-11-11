@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
 
@@ -305,7 +306,7 @@ static int __send_message(FILE *fp, char *fmt,...)
 static int send_reply(s_protocol_out *out)
 {
     size_t outlen = 0;
-    unsigned char *outstr = base64_encode((void *)out->buf, out->len + 1, &outlen);
+    unsigned char *outstr = base64_encode((void *)out->buf, out->len, &outlen);
     if (outstr == NULL) {
         return -ENOMEM;
     }
@@ -489,7 +490,6 @@ static int do_putfile(char *line)
 
     size_t bytes = 0;
     while (length > bytes) {
-
         /* Read file data */
         char * line = NULL;
         size_t linelen = 0;
@@ -556,6 +556,123 @@ end:
     return ret;
 }
 
+static int do_getfile(char *line)
+{
+    /* srdfile dstfile blocksize */
+    int ret;
+    FILE *fp = NULL;
+    s_protocol_in in;
+    s_protocol_out out;
+    size_t length = 0;
+    size_t blocksize = 0;
+    char srcfile[NAME_MAX];
+    char dstfile[NAME_MAX];
+
+    ret = sscanf(line, "%s %s %lu", srcfile, dstfile, &blocksize);
+    if (ret == EOF) {
+        ret = -errno;
+        goto end; 
+    }
+
+    char *blockbuf = malloc(blocksize + 1);
+    if (blockbuf == NULL) {
+        ret = -ENOMEM;
+        goto end; 
+    }
+
+    /* Check file */
+    struct stat st;
+    if (stat(srcfile, &st) < 0) {
+        ret = -errno;
+        goto end; 
+    }
+    length = st.st_size;
+
+    /* Reply to client and send filesize to it */
+    char __buff[16];
+    snprintf(__buff, sizeof(__buff), "%lu", length);
+    memset(&out, 0, sizeof(s_protocol_out));
+    out.session = g_session;
+    out.status = 0;
+    out.command = CMD_TYPE_GETFILE;
+    out.buf = __buff;
+    out.len = strlen(out.buf);
+    send_reply(&out);
+
+    /* Save file */
+    fp = fopen(srcfile, "rb");
+    if (fp == NULL) {
+        ret = -errno;
+        goto end; 
+    }
+
+    size_t needed = length;
+    while (needed > 0) {
+        /* Read file */
+        size_t bsize = blocksize > needed ? needed: blocksize;
+        if (fread(blockbuf, 1, bsize, fp) != bsize) {
+            ret = -ENODATA;
+            goto end; 
+        }
+        blockbuf[bsize] = '\0';
+
+        /* Send data */
+        memset(&out, 0, sizeof(s_protocol_out));
+        out.session = g_session;
+        out.status = 0;
+        out.command = CMD_TYPE_GETFILE;
+        out.buf = blockbuf;
+        out.len = strlen(out.buf);
+        send_reply(&out);
+
+        /* Recv ack */
+        char * line = NULL;
+        size_t linelen = 0;
+        ssize_t n = getline(&line, &linelen, g_ifp);
+        if (n < 0) {
+            if (line) free(line);
+            /* Client disconnect */
+            __cleanup(0);
+        }
+
+        ret = __parse_message(line, &in);
+        if (ret && 
+            in.session != g_session &&
+            in.command != CMD_TYPE_GETFILE) {
+            ret = -EINVAL;
+            goto end;
+        }
+
+        /* End once loop */
+        needed -= bsize;
+    }
+
+    /* End */
+    fclose(fp);
+    free(blockbuf);
+
+    return 0;
+
+end:
+    memset(&out, 0, sizeof(s_protocol_out));
+    out.session = g_session;
+    out.status = -ret;
+    out.command = CMD_TYPE_GETFILE;
+    out.buf = strerror(out.status);
+    out.len = strlen(out.buf);
+    send_reply(&out);
+
+    if (fp) {
+        fclose(fp);
+    }
+
+    if (blockbuf) {
+        free(blockbuf);
+    }
+
+    return ret;
+}
+
 static int do_quitexe(char *line)
 {
     int ret = 0;
@@ -616,6 +733,9 @@ static int do_command(char *line)
         break;
     case CMD_TYPE_PUTFILE:
         ret = do_putfile((char *)outstr);
+        break;
+    case CMD_TYPE_GETFILE:
+        ret = do_getfile((char *)outstr);
         break;
     default:
         /* illegal command */
