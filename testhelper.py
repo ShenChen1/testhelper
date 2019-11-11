@@ -147,7 +147,7 @@ class th_client(object):
                 logging.error("[%s]: " % (status) + bufstr)
                 raise RuntimeError("CmdTypeError:%s" % command)
             else:
-                logging.info("Sending '%s' ... (%.02f %%)" % (srcfile, (length - needed) / length * 100))
+                logging.info("Sending '%s' ... (%.02f %%)" % (srcfile, float(length - needed) / length * 100))
 
         # close file
         file.close()

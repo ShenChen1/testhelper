@@ -328,9 +328,12 @@ static int send_reply(s_protocol_out *out)
     return 0;
 }
 
-static void __timedout(int sig)
+static void __timeout(int sig)
 {
     s_protocol_out out;
+
+    /* kill the whole process group */
+    kill(-getpid(), SIGTERM);
 
     memset(&out, 0, sizeof(s_protocol_out));
     out.session = g_session;
@@ -396,6 +399,9 @@ static int do_shellcmd(char *line)
     int ret = 0;
     const char open_mode[] = "re";
     s_protocol_out out;
+
+    /* Set process group, so that child can be killed by parent */
+    setpgid(0, 0);
 
     FILE *popen_stream = popen(line, open_mode);
     if (popen_stream == NULL) {
@@ -664,7 +670,7 @@ static int do_process(int ifd, int ofd)
     out.len = strlen(out.buf);
     send_reply(&out);
 
-    signal(SIGALRM, __timedout);
+    signal(SIGALRM, __timeout);
     alarm(g_timeout);
 
     /* Loop */
