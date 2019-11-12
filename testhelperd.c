@@ -179,9 +179,10 @@ unsigned char * base64_decode(const unsigned char *src, size_t len,
         return NULL;
 
     olen = count / 4 * 3;
-    pos = out = malloc(olen);
+    pos = out = malloc(olen + 1);
     if (out == NULL)
         return NULL;
+    out[olen] = '\0';
 
     count = 0;
     for (i = 0; i < len; i++) {
@@ -386,6 +387,8 @@ static int __parse_message(char *line, s_protocol_in *in)
         goto err;
     }
 
+    char *p = strchr(buf, '\n');
+    *p = '\0';
     in->len = strlen(buf);
     in->buf = buf;
 
@@ -469,7 +472,7 @@ static int do_putfile(char *line)
     ret = sscanf(line, "%s %s %lu", srcfile, dstfile, &length);
     if (ret == EOF) {
         ret = -errno;
-        goto end; 
+        goto end;
     }
 
     /* Reply to client and let it send data */
@@ -485,7 +488,7 @@ static int do_putfile(char *line)
     fp = fopen(dstfile, "wb+");
     if (fp == NULL) {
         ret = -errno;
-        goto end; 
+        goto end;
     }
 
     size_t bytes = 0;
@@ -497,19 +500,20 @@ static int do_putfile(char *line)
         if (n < 0) {
             if (line) free(line);
             /* Client disconnect */
-            __cleanup(0);
+            ret = -EPIPE;
+            goto end;
         }
 
         ret = __parse_message(line, &in);
-        if (ret && 
-            in.session != g_session &&
-            in.command != CMD_TYPE_PUTFILE) {
+        if (ret &&
+                in.session != g_session &&
+                in.command != CMD_TYPE_PUTFILE) {
             ret = -EINVAL;
             goto end;
         }
 
         size_t bsize = 0;
-        unsigned char *outstr = base64_decode((void *)in.buf, in.len + 1, &bsize);
+        unsigned char *outstr = base64_decode((void *)in.buf, in.len, &bsize);
         if (outstr == NULL) {
             ret = -ENOMEM;
             goto end;
@@ -523,6 +527,7 @@ static int do_putfile(char *line)
 
         /* End once loop */
         free(outstr);
+        free(line);
         bytes += bsize;
 
         /* ACK */
@@ -569,33 +574,32 @@ static int do_getfile(char *line)
     char dstfile[NAME_MAX];
 
     ret = sscanf(line, "%s %s %lu", srcfile, dstfile, &blocksize);
-    if (ret == EOF) {
+    if (ret != 3) {
         ret = -errno;
-        goto end; 
+        goto end;
     }
 
     char *blockbuf = malloc(blocksize + 1);
     if (blockbuf == NULL) {
         ret = -ENOMEM;
-        goto end; 
+        goto end;
     }
 
     /* Check file */
     struct stat st;
     if (stat(srcfile, &st) < 0) {
         ret = -errno;
-        goto end; 
+        goto end;
     }
     length = st.st_size;
 
     /* Reply to client and send filesize to it */
-    char __buff[16];
-    snprintf(__buff, sizeof(__buff), "%lu", length);
+    snprintf(blockbuf, blocksize, "%lu", length);
     memset(&out, 0, sizeof(s_protocol_out));
     out.session = g_session;
     out.status = 0;
     out.command = CMD_TYPE_GETFILE;
-    out.buf = __buff;
+    out.buf = blockbuf;
     out.len = strlen(out.buf);
     send_reply(&out);
 
@@ -603,7 +607,7 @@ static int do_getfile(char *line)
     fp = fopen(srcfile, "rb");
     if (fp == NULL) {
         ret = -errno;
-        goto end; 
+        goto end;
     }
 
     size_t needed = length;
@@ -612,7 +616,7 @@ static int do_getfile(char *line)
         size_t bsize = blocksize > needed ? needed: blocksize;
         if (fread(blockbuf, 1, bsize, fp) != bsize) {
             ret = -ENODATA;
-            goto end; 
+            goto end;
         }
         blockbuf[bsize] = '\0';
 
@@ -632,19 +636,21 @@ static int do_getfile(char *line)
         if (n < 0) {
             if (line) free(line);
             /* Client disconnect */
-            __cleanup(0);
+            ret = -EPIPE;
+            goto end;
         }
 
         ret = __parse_message(line, &in);
-        if (ret && 
-            in.session != g_session &&
-            in.command != CMD_TYPE_GETFILE) {
+        if (ret &&
+                in.session != g_session &&
+                in.command != CMD_TYPE_GETFILE) {
             ret = -EINVAL;
             goto end;
         }
 
         /* End once loop */
         needed -= bsize;
+        free(line);
     }
 
     /* End */
@@ -718,7 +724,7 @@ static int do_command(char *line)
     }
 
     size_t outline = 0;
-    unsigned char *outstr = base64_decode((void *)in.buf, in.len + 1, &outline);
+    unsigned char *outstr = base64_decode((void *)in.buf, in.len, &outline);
     if (outstr == NULL) {
         ret = -ENOMEM;
         goto err;
@@ -742,7 +748,7 @@ static int do_command(char *line)
         ret = -EPERM;
         break;
     }
-    
+
     /* Decode memory */
     free(outstr);
 
@@ -809,6 +815,7 @@ static int do_process(int ifd, int ofd)
 
         do_command(line);
         fflush(g_ofp);
+        free(line);
     }
 
     return 0;
