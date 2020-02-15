@@ -403,6 +403,8 @@ static int do_shellcmd(char *line)
     int ret = 0;
     const char open_mode[] = "re";
     s_protocol_out out;
+    int rs_size = 0;
+    char *rs_buf = NULL;
 
     /* Set process group, so that child can be killed by parent */
     setpgid(0, 0);
@@ -412,8 +414,6 @@ static int do_shellcmd(char *line)
         goto end;
     }
 
-    int rs_size = 0;
-    char *rs_buf = NULL;
     /* Get all output */
     while (1) {
         char *line = NULL;
@@ -469,7 +469,7 @@ static int do_putfile(char *line)
     char srcfile[NAME_MAX];
     char dstfile[NAME_MAX];
 
-    ret = sscanf(line, "%s %s %lu", srcfile, dstfile, &length);
+    ret = sscanf(line, "%s %s %zu", srcfile, dstfile, &length);
     if (ret == EOF) {
         ret = -errno;
         goto end;
@@ -569,17 +569,18 @@ static int do_getfile(char *line)
     s_protocol_in in;
     s_protocol_out out;
     size_t length = 0;
+    char *blockbuf = NULL;
     size_t blocksize = 0;
     char srcfile[NAME_MAX];
     char dstfile[NAME_MAX];
 
-    ret = sscanf(line, "%s %s %lu", srcfile, dstfile, &blocksize);
+    ret = sscanf(line, "%s %s %zu", srcfile, dstfile, &blocksize);
     if (ret != 3) {
         ret = -errno;
         goto end;
     }
 
-    char *blockbuf = malloc(blocksize + 1);
+    blockbuf = malloc(blocksize + 1);
     if (blockbuf == NULL) {
         ret = -ENOMEM;
         goto end;
@@ -594,7 +595,7 @@ static int do_getfile(char *line)
     length = st.st_size;
 
     /* Reply to client and send filesize to it */
-    snprintf(blockbuf, blocksize, "%lu", length);
+    snprintf(blockbuf, blocksize, "%zu", length);
     memset(&out, 0, sizeof(s_protocol_out));
     out.session = g_session;
     out.status = 0;
