@@ -279,6 +279,7 @@ def main():
 
     except RuntimeError as e:
         logging.error('%s %s: %s' % (args.fhost, args.cmds, e))
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
