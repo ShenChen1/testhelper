@@ -253,7 +253,7 @@ class th_client(object):
     @staticmethod
     def __parse_message(buf):
         # (session) <status> {command} base64-buf
-        pattern = re.compile(r"^\((\d+)\) \<(\d+)\> \{(\w+)\} (.*)\n$")
+        pattern = re.compile(r"^\((\d+)\) \<(-?\d+)\> \{(\w+)\} (.*)\n$")
         (session, status, command, bufstr) = pattern.match(buf).groups()
         bufstr = base64.b64decode(bufstr)
         return (session, status, command, bufstr)
