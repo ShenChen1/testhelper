@@ -448,7 +448,9 @@ end:
     out.session = g_session;
     out.status = -ret;
     out.command = CMD_TYPE_SHELLCMD;
-    out.buf = rs_buf ? rs_buf : strerror(out.status);
+    if (rs_buf == NULL && ret)
+        rs_buf = strerror(out.status);
+    out.buf = rs_buf ? rs_buf : "";
     out.len = strlen(out.buf);
     send_reply(&out);
 

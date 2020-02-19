@@ -13,7 +13,7 @@ class th_client(object):
 
     def __init__(self, verbose):
         # log config
-        level = logging.INFO if verbose == False else logging.DEBUG
+        level = logging.ERROR if verbose == False else logging.DEBUG
         format = "PID[%(process)d]-[%(levelname)s]: %(message)s"
         logging.basicConfig(level=level, format=format)
 
@@ -79,11 +79,13 @@ class th_client(object):
             if command != self.__cmd_type_shellcmd:
                 raise RuntimeError("CmdTypeError:%s" % command)
 
-            if status == "0":
-                logging.info("Running '%s' ... \n" % (cmd) + bufstr)
-            else:
-                logging.info("Running '%s' ... " % cmd)
-                logging.error("[%s]: " % (status) + bufstr)
+            bufstr = bufstr.strip()
+            status = int(status)
+            logging.info("Running '%s' ... " % cmd)
+            if len(bufstr):
+                print(bufstr)
+            if status:
+                sys.exit(status)
 
     def __do_quitexe(self, cmdline):
         # send quit cmd
