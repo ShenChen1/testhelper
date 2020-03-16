@@ -102,7 +102,7 @@ class th_client(object):
             raise RuntimeError("FileError:%s is not a file" % srcfile)
 
         # find the dstfile name
-        dstfile = os.path.basename(srcfile)  
+        dstfile = os.path.basename(srcfile)
         if len(cmdline) > 1:
             dstfile = cmdline[1]
 
@@ -164,7 +164,7 @@ class th_client(object):
         # find the srcfile name
         srcfile = cmdline[0]
         # find the dstfile name
-        dstfile = os.path.basename(srcfile)  
+        dstfile = os.path.basename(srcfile)
         if len(cmdline) > 1:
             dstfile = cmdline[1]
 
@@ -196,7 +196,7 @@ class th_client(object):
         needed = length
         while needed > 0:
             # recv data
-            buf = self.__getline(self.__socket) 
+            buf = self.__getline(self.__socket)
             (session, status, command, bufstr) = self.__parse_message(buf)
             if command != self.__cmd_type_getfile:
                 raise RuntimeError("CmdTypeError:%s" % command)
