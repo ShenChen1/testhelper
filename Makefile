@@ -1,5 +1,5 @@
 CC = $(CROSS_COMPILE)gcc
-CFLAGS += -Os -g -Werror -Wall 
+CFLAGS += -Os -g -Werror -Wall
 
 all: clean testhelperd
 

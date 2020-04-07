@@ -1,20 +1,26 @@
 # Linux test helper
+
 Run cmd on target machine via testhelperd
 
 ## Compile
+
 ```
-[root@sc testhelper]# gcc testhelperd.c -g -Werror -Wall -o testhelperd
+[root@sc testhelper]# make all CROSS_COMPILE=x86_64-redhat-linux-
+rm -rf testhelperd __log.*
+x86_64-redhat-linux-gcc -Os -g -Werror -Wall testhelperd.c -o testhelperd
 ```
 
 ## Server
+
 ```
 [root@sc testhelper]# ./testhelperd -p 1234 -d
 ```
 
 ## Client
+
 ```
 [root@sc testhelper]# ./testhelper.py 192.168.0.23:1234 shellcmd ls "ls -al"
-PID[13704]-[INFO]: Running 'ls' ... 
+PID[13704]-[INFO]: Running 'ls' ...
 hosts
 Makefile
 README.md
@@ -22,7 +28,7 @@ testhelperd
 testhelperd.c
 testhelper.py
 
-PID[13704]-[INFO]: Running 'ls -al' ... 
+PID[13704]-[INFO]: Running 'ls -al' ...
 total 80
 drwxr-xr-x 2 root root   125 Nov 12 21:51 .
 drwxr-xr-x 5 root root    53 Nov 12 21:17 ..
@@ -34,12 +40,10 @@ drwxr-xr-x 5 root root    53 Nov 12 21:17 ..
 -rwxr-xr-x 1 root root  9906 Nov 12 21:40 testhelper.py
 
 [root@sc testhelper]# ./testhelper.py 192.168.0.23:1234 putfile /etc/hosts hosts
-PID[13711]-[INFO]: Begin to send '/etc/hosts' ... 
+PID[13711]-[INFO]: Begin to send '/etc/hosts' ...
 PID[13711]-[INFO]: Sending '/etc/hosts' ... (100.00 %)
 
 [root@sc testhelper]# ./testhelper.py 192.168.0.23:1234 getfile /etc/hosts hosts
-PID[13714]-[INFO]: Begin to receive '/etc/hosts' ... 
+PID[13714]-[INFO]: Begin to receive '/etc/hosts' ...
 PID[13714]-[INFO]: Receiving '/etc/hosts' ... (100.00 %)
-
 ```
-
