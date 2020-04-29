@@ -185,6 +185,12 @@ class th_client(object):
             raise RuntimeError("CmdTypeError:%s" % command)
         else:
             logging.info("Begin to receive '%s' ... " % srcfile)
+            # send ack
+            self.__send_message(
+                self.__socket,
+                self.__session,
+                self.__cmd_type_getfile,
+                "continue")
         length = int(bufstr.strip('\0'))
 
         # create file

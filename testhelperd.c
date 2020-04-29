@@ -318,15 +318,14 @@ static int send_reply(s_protocol_out *out)
                    g_cmd_type[out->command],
                    outstr);
 
-    free(outstr);
-
     /* Debug */
     __send_message(g_lfp, "server: (%d) <%d> {%s} %s\n",
                    g_session,
                    out->status,
                    g_cmd_type[out->command],
-                   out->buf);
+                   outstr);
 
+    free(outstr);
     return 0;
 }
 
@@ -354,6 +353,10 @@ static int __parse_message(char *line, s_protocol_in *in)
     char *buf = line;
     char *session = NULL;
     char *command = NULL;
+
+    /* Save cmd to log */
+    fprintf(g_lfp, "client: %s", line);
+    fflush(g_lfp);
 
     session = strchr(buf, '(') + 1;
     buf = strchr(buf, ')');
@@ -606,6 +609,24 @@ static int do_getfile(char *line)
     out.len = strlen(out.buf);
     send_reply(&out);
 
+    /* Wait for ACK */
+    char * sline = NULL;
+    size_t slinelen = 0;
+    ssize_t n = getline(&sline, &slinelen, g_ifp);
+    if (n < 0) {
+        /* Client disconnect */
+        ret = -EPIPE;
+        goto end;
+    }
+
+    ret = __parse_message(sline, &in);
+    if (ret &&
+            in.session != g_session &&
+            in.command != CMD_TYPE_GETFILE) {
+        ret = -EINVAL;
+        goto end;
+    }
+
     /* Save file */
     fp = fopen(srcfile, "rb");
     if (fp == NULL) {
@@ -633,17 +654,14 @@ static int do_getfile(char *line)
         send_reply(&out);
 
         /* Recv ack */
-        char * line = NULL;
-        size_t linelen = 0;
-        ssize_t n = getline(&line, &linelen, g_ifp);
+        n = getline(&sline, &slinelen, g_ifp);
         if (n < 0) {
-            if (line) free(line);
             /* Client disconnect */
             ret = -EPIPE;
             goto end;
         }
 
-        ret = __parse_message(line, &in);
+        ret = __parse_message(sline, &in);
         if (ret &&
                 in.session != g_session &&
                 in.command != CMD_TYPE_GETFILE) {
@@ -653,12 +671,12 @@ static int do_getfile(char *line)
 
         /* End once loop */
         needed -= bsize;
-        free(line);
     }
 
     /* End */
     fclose(fp);
     free(blockbuf);
+    free(sline);
 
     return 0;
 
@@ -674,9 +692,11 @@ end:
     if (fp) {
         fclose(fp);
     }
-
     if (blockbuf) {
         free(blockbuf);
+    }
+    if (sline) {
+        free(sline);
     }
 
     return ret;
@@ -716,10 +736,6 @@ static int do_command(char *line)
     int ret;
     s_protocol_in in;
     s_protocol_out out;
-
-    /* Save cmd to log */
-    fprintf(g_lfp, "client: %s", line);
-    fflush(g_lfp);
 
     ret = __parse_message(line, &in);
     if (ret && in.session != g_session) {
