@@ -212,7 +212,7 @@ class th_client(object):
             self.__send_message(
                 self.__socket,
                 self.__session,
-                self.__cmd_type_putfile,
+                self.__cmd_type_getfile,
                 "continue")
 
         # close file

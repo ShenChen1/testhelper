@@ -629,7 +629,7 @@ static int do_getfile(char *line)
         out.status = 0;
         out.command = CMD_TYPE_GETFILE;
         out.buf = blockbuf;
-        out.len = strlen(out.buf);
+        out.len = bsize;
         send_reply(&out);
 
         /* Recv ack */
