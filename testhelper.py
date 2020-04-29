@@ -256,7 +256,10 @@ class th_client(object):
     def __parse_message(buf):
         # (session) <status> {command} base64-buf
         pattern = re.compile(r"^\((\d+)\) \<(-?\d+)\> \{(\w+)\} (.*)\n$")
-        (session, status, command, bufstr) = pattern.match(buf).groups()
+        match = pattern.match(buf)
+        if match is None:
+            raise RuntimeError("ValueError:%s" % buf)
+        (session, status, command, bufstr) = match.groups()
         bufstr = base64.b64decode(bufstr)
         return (session, status, command, bufstr)
 
