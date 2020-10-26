@@ -1,44 +1,42 @@
-#include <stdio.h>
 #include <errno.h>
+#include <limits.h>
+#include <netinet/in.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
-#include <unistd.h>
-#include <limits.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
-#include <netinet/in.h>
+#include <unistd.h>
 
-#define PROGNAME    "testhelperd"
-#define VERSION     "0.003"
+#define PROGNAME "testhelperd"
+#define VERSION "0.003"
 
 /*
 protocol:
-
 in:
 (session) {command} base64-buf
-
 out:
 (session) <status> {command} base64-buf
 */
 
 typedef struct {
-    int     session;
-    int     command;
+    int session;
+    int command;
 
-    size_t  len;
-    char   *buf;
+    size_t len;
+    char *buf;
 } s_protocol_in;
 
 typedef struct {
-    int     session;
-    int     status;
-    int     command;
+    int session;
+    int status;
+    int command;
 
-    size_t  len;
-    char   *buf;
+    size_t len;
+    char *buf;
 } s_protocol_out;
 
 extern char *optarg;
@@ -74,7 +72,7 @@ typedef enum {
 
 static const char *g_cmd_type[CMD_TYPE_MAX] = {
     [CMD_TYPE_UNKNOWN] = "unknown",
-    [CMD_TYPE_HANDSHAKE] ="handshake",
+    [CMD_TYPE_HANDSHAKE] = "handshake",
     [CMD_TYPE_TIMEOUT] = "timeout",
 
     [CMD_TYPE_SHELLCMD] = "shellcmd",
@@ -99,8 +97,9 @@ static const unsigned char base64_table[65] =
  * nul terminated to make it easier to use as a C string. The nul terminator is
  * not included in out_len.
  */
-unsigned char * base64_encode(const unsigned char *src, size_t len,
-                              size_t *out_len)
+unsigned char *base64_encode(const unsigned char *src,
+                             size_t len,
+                             size_t *out_len)
 {
     unsigned char *out, *pos;
     const unsigned char *end, *in;
@@ -108,7 +107,7 @@ unsigned char * base64_encode(const unsigned char *src, size_t len,
     int line_len;
 
     olen = len * 4 / 3 + 4; /* 3-byte blocks to 4-byte */
-    olen++; /* nul termination */
+    olen++;                 /* nul termination */
     if (olen < len)
         return NULL; /* integer overflow */
     out = malloc(olen);
@@ -157,8 +156,9 @@ unsigned char * base64_encode(const unsigned char *src, size_t len,
  *
  * Caller is responsible for freeing the returned buffer.
  */
-unsigned char * base64_decode(const unsigned char *src, size_t len,
-                              size_t *out_len)
+unsigned char *base64_decode(const unsigned char *src,
+                             size_t len,
+                             size_t *out_len)
 {
     unsigned char dtable[256], *out, *pos, block[4], tmp;
     size_t i, count, olen;
@@ -166,7 +166,7 @@ unsigned char * base64_decode(const unsigned char *src, size_t len,
 
     memset(dtable, 0x80, 256);
     for (i = 0; i < sizeof(base64_table) - 1; i++)
-        dtable[base64_table[i]] = (unsigned char) i;
+        dtable[base64_table[i]] = (unsigned char)i;
     dtable['='] = 0;
 
     count = 0;
@@ -220,7 +220,7 @@ unsigned char * base64_decode(const unsigned char *src, size_t len,
 
 static void usage()
 {
-    fprintf(stderr,"usage: %s [-vd] [-t timeout] [-p port] [-w working directory]\n", PROGNAME);
+    fprintf(stderr, "usage: %s [-vd] [-t timeout] [-p port] [-w working directory]\n", PROGNAME);
     exit(EINVAL);
 }
 
@@ -256,7 +256,7 @@ static int parse_config(int argc, char **argv)
 static int do_daemon()
 {
     if (g_daemonize) {
-        if (daemon(1,1) != 0) {
+        if (daemon(1, 1) != 0) {
             perror("daemon");
             exit(errno);
         }
@@ -270,8 +270,7 @@ static int do_daemon()
 
 static int do_verbose()
 {
-    snprintf(g_logfile, sizeof(g_logfile),
-             g_verbose ? "__log.%d" : "/dev/null", g_session);
+    snprintf(g_logfile, sizeof(g_logfile), g_verbose ? "__log.%d" : "/dev/null", g_session);
 
     g_lfp = fopen(g_logfile, "w");
     if (!g_lfp) {
@@ -291,7 +290,7 @@ static int __cleanup(int code)
     exit(code);
 }
 
-static int __send_message(FILE *fp, char *fmt,...)
+static int __send_message(FILE *fp, char *fmt, ...)
 {
     va_list va;
 
@@ -307,23 +306,17 @@ static int __send_message(FILE *fp, char *fmt,...)
 static int send_reply(s_protocol_out *out)
 {
     size_t outlen = 0;
-    unsigned char *outstr = base64_encode((void *)out->buf, out->len, &outlen);
+    unsigned char *outstr = base64_encode((void*)out->buf, out->len, &outlen);
     if (outstr == NULL) {
         return -ENOMEM;
     }
 
-    __send_message(g_ofp, "(%d) <%d> {%s} %s\n",
-                   g_session,
-                   out->status,
-                   g_cmd_type[out->command],
-                   outstr);
+    __send_message(g_ofp, "(%d) <%d> {%s} %s\n", g_session, out->status,
+                   g_cmd_type[out->command], outstr);
 
     /* Debug */
-    __send_message(g_lfp, "server: (%d) <%d> {%s} %s\n",
-                   g_session,
-                   out->status,
-                   g_cmd_type[out->command],
-                   outstr);
+    __send_message(g_lfp, "server: (%d) <%d> {%s} %s\n", g_session, out->status,
+                   g_cmd_type[out->command], outstr);
 
     free(outstr);
     return 0;
@@ -364,6 +357,7 @@ static int __parse_message(char *line, s_protocol_in *in)
         goto err;
     }
     *buf++ = '\0';
+
     /* session */
     in->session = strtoul(session, NULL, 0);
 
@@ -373,6 +367,7 @@ static int __parse_message(char *line, s_protocol_in *in)
         goto err;
     }
     *buf++ = '\0';
+
     /* Find cmd type */
     for (i = 0; i < CMD_TYPE_MAX; i++) {
         if (!strcmp(g_cmd_type[i], command)) {
@@ -423,7 +418,8 @@ static int do_shellcmd(char *line)
         size_t len = 0;
         ssize_t read = getline(&line, &len, popen_stream);
         if (read == -1) {
-            if (line) free(line);
+            if (line)
+                free(line);
             break;
         }
 
@@ -458,7 +454,8 @@ end:
     send_reply(&out);
 
     /* Free the buffer for saving result */
-    if (rs_buf) free(rs_buf);
+    if (rs_buf)
+        free(rs_buf);
 
     return ret;
 }
@@ -499,26 +496,25 @@ static int do_putfile(char *line)
     size_t bytes = 0;
     while (length > bytes) {
         /* Read file data */
-        char * line = NULL;
+        char *line = NULL;
         size_t linelen = 0;
         ssize_t n = getline(&line, &linelen, g_ifp);
         if (n < 0) {
-            if (line) free(line);
+            if (line)
+                free(line);
             /* Client disconnect */
             ret = -EPIPE;
             goto end;
         }
 
         ret = __parse_message(line, &in);
-        if (ret &&
-                in.session != g_session &&
-                in.command != CMD_TYPE_PUTFILE) {
+        if (ret && in.session != g_session && in.command != CMD_TYPE_PUTFILE) {
             ret = -EINVAL;
             goto end;
         }
 
         size_t bsize = 0;
-        unsigned char *outstr = base64_decode((void *)in.buf, in.len, &bsize);
+        unsigned char *outstr = base64_decode((void*)in.buf, in.len, &bsize);
         if (outstr == NULL) {
             ret = -ENOMEM;
             goto end;
@@ -610,7 +606,7 @@ static int do_getfile(char *line)
     send_reply(&out);
 
     /* Wait for ACK */
-    char * sline = NULL;
+    char *sline = NULL;
     size_t slinelen = 0;
     ssize_t n = getline(&sline, &slinelen, g_ifp);
     if (n < 0) {
@@ -620,9 +616,7 @@ static int do_getfile(char *line)
     }
 
     ret = __parse_message(sline, &in);
-    if (ret &&
-            in.session != g_session &&
-            in.command != CMD_TYPE_GETFILE) {
+    if (ret && in.session != g_session && in.command != CMD_TYPE_GETFILE) {
         ret = -EINVAL;
         goto end;
     }
@@ -637,7 +631,7 @@ static int do_getfile(char *line)
     size_t needed = length;
     while (needed > 0) {
         /* Read file */
-        size_t bsize = blocksize > needed ? needed: blocksize;
+        size_t bsize = blocksize > needed ? needed : blocksize;
         if (fread(blockbuf, 1, bsize, fp) != bsize) {
             ret = -ENODATA;
             goto end;
@@ -662,9 +656,7 @@ static int do_getfile(char *line)
         }
 
         ret = __parse_message(sline, &in);
-        if (ret &&
-                in.session != g_session &&
-                in.command != CMD_TYPE_GETFILE) {
+        if (ret && in.session != g_session && in.command != CMD_TYPE_GETFILE) {
             ret = -EINVAL;
             goto end;
         }
@@ -743,29 +735,29 @@ static int do_command(char *line)
     }
 
     size_t outline = 0;
-    unsigned char *outstr = base64_decode((void *)in.buf, in.len, &outline);
+    unsigned char *outstr = base64_decode((void*)in.buf, in.len, &outline);
     if (outstr == NULL) {
         ret = -ENOMEM;
         goto err;
     }
 
-    switch(in.command) {
-    case CMD_TYPE_SHELLCMD:
-        ret = do_shellcmd((char *)outstr);
-        break;
-    case CMD_TYPE_QUITEXE:
-        ret = do_quitexe((char *)outstr);
-        break;
-    case CMD_TYPE_PUTFILE:
-        ret = do_putfile((char *)outstr);
-        break;
-    case CMD_TYPE_GETFILE:
-        ret = do_getfile((char *)outstr);
-        break;
-    default:
-        /* illegal command */
-        ret = -EPERM;
-        break;
+    switch (in.command) {
+        case CMD_TYPE_SHELLCMD:
+            ret = do_shellcmd((char*)outstr);
+            break;
+        case CMD_TYPE_QUITEXE:
+            ret = do_quitexe((char*)outstr);
+            break;
+        case CMD_TYPE_PUTFILE:
+            ret = do_putfile((char*)outstr);
+            break;
+        case CMD_TYPE_GETFILE:
+            ret = do_getfile((char*)outstr);
+            break;
+        default:
+            /* illegal command */
+            ret = -EPERM;
+            break;
     }
 
     /* Decode memory */
@@ -823,11 +815,12 @@ static int do_process(int ifd, int ofd)
         /* Reset time count */
         alarm(g_timeout);
 
-        char * line = NULL;
+        char *line = NULL;
         size_t linelen = 0;
         ssize_t n = getline(&line, &linelen, g_ifp);
         if (n < 0) {
-            if (line) free(line);
+            if (line)
+                free(line);
             /* Client disconnect */
             __cleanup(0);
         }
@@ -850,7 +843,7 @@ static int init_server()
         exit(errno);
     }
 
-    memset((char *) &serv_addr, 0, sizeof(serv_addr));
+    memset((char*)&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(g_portno);
 
@@ -858,7 +851,7 @@ static int init_server()
     int on = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 
-    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    if (bind(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("bind");
         exit(errno);
     }
@@ -881,7 +874,7 @@ static int start_server()
 
     while (1) {
         socklen_t clilen = sizeof(cli_addr);
-        int newsockfd = accept(g_sockfd, (struct sockaddr *)&cli_addr, &clilen);
+        int newsockfd = accept(g_sockfd, (struct sockaddr*)&cli_addr, &clilen);
         if (newsockfd < 0) {
             perror("accept");
             sleep(2);

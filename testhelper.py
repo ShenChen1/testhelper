@@ -190,7 +190,7 @@ class th_client(object):
                 self.__socket,
                 self.__session,
                 self.__cmd_type_getfile,
-                "continue")
+                "Continue")
         length = int(bufstr.strip('\0'))
 
         # create file
@@ -219,7 +219,7 @@ class th_client(object):
                 self.__socket,
                 self.__session,
                 self.__cmd_type_getfile,
-                "continue")
+                "Continue")
 
         # close file
         file.close()
